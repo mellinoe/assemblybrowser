@@ -13,6 +13,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AssemblyBrowserWindow.cs" />
+    <Compile Include="AsyncStringResult.cs" />
+    <Compile Include="CilToStringUtilities.cs" />
+    <Compile Include="Colors.cs" />
+    <Compile Include="ListNodes.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="SimpleGLWindow.cs" />
   </ItemGroup>

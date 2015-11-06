@@ -1,108 +1,123 @@
 ﻿using ImGuiNET;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection.Metadata.Cil;
 using System.Text;
-using System.Threading.Tasks;
 using System.Numerics;
 using System.Reflection.Metadata.Cil.Visitor;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using System.Threading;
 
 namespace AssemblyBrowser
 {
     public class AssemblyBrowserWindow : SimpleGLWindow
     {
+        private const string ListViewID = "AssemblyListView";
         private List<CilAssembly> _loadedAssemblies = new List<CilAssembly>();
+        private List<IListNode> _listNodes = new List<IListNode>();
 
         private readonly uint _leftFrameId = 0;
         private uint _rightFrameID = 1;
 
         private float _leftFrameRatio = 0.35f;
         private CilMethodDefinition? _selectedMethod;
-        private IntPtr _methodIlTextBuff;
-        private int _methodIlTextBuffLength;
+
+        private AsyncTextInputBufferResult _rightFrameTextBuffer = new AsyncTextInputBufferResult(() => "", default(CancellationToken));
 
         private IntPtr _filePathInputBuff = Marshal.AllocHGlobal(1024);
         private uint _filePathInputLength = 1024;
+        private string _currentRightFrameText;
+        private const int MaxRightFrameLength = Int32.MaxValue;
+        private CancellationTokenSource _source;
+        private IListNode _currentRightFrameNode;
 
-        public AssemblyBrowserWindow() : base("Assembly Browser", 1024, 576)
+        public AssemblyBrowserWindow() : base(".NET Assembly Browser", 1024, 576)
         {
         }
 
         internal void AddAssembly(CilAssembly assm)
         {
-            _loadedAssemblies.Add(assm);
+            lock (_loadedAssemblies)
+            {
+                _loadedAssemblies.Add(assm);
+                _listNodes.Add(new AssemblyNode(assm));
+            }
         }
 
         protected unsafe override void UpdateRenderState()
         {
-            bool opened = true;
             ImGuiNative.igGetStyle()->WindowRounding = 0;
-            ImGuiNative.igSetNextWindowSize(new Vector2(NativeWindow.Width - 10, NativeWindow.Height), SetCondition.Always);
-            ImGuiNative.igSetNextWindowPosCenter(SetCondition.Always);
-            ImGuiNative.igBegin("Assembly Browser Main Window", ref opened,
+            var leftFrameSize = new Vector2(NativeWindow.Width - 10, NativeWindow.Height);
+            ImGui.SetNextWindowSize(leftFrameSize, SetCondition.Always);
+            ImGui.SetNextWindowPosCenter(SetCondition.Always);
+            ImGui.BeginWindow("Assembly Browser Main Window",
                 WindowFlags.NoResize | WindowFlags.NoTitleBar | WindowFlags.NoMove | WindowFlags.ShowBorders | WindowFlags.MenuBar | WindowFlags.NoScrollbar);
 
             DrawTopMenuBar();
 
             // Left panel
-            //ImGuiNative.igSetNextWindowContentWidth(_leftFrameRatio * ImGuiNative.igGetWindowWidth());
-            ImGuiNative.igBeginChildFrame
+            ImGui.BeginChildFrame
                 (_leftFrameId,
-                new Vector2(_leftFrameRatio * ImGuiNative.igGetWindowWidth(),
-                ImGuiNative.igGetWindowHeight() - 40),
+                new Vector2(_leftFrameRatio * ImGui.GetWindowWidth(),
+                ImGui.GetWindowHeight() - 40),
                 WindowFlags.ShowBorders | WindowFlags.HorizontalScrollbar);
             DrawAssemblyListView();
-            ImGuiNative.igEndChildFrame();
+            ImGui.EndChildFrame();
 
-            ImGuiNative.igSameLine(0, 4);
-            Vector2 rightFrameSize = new Vector2((1 - _leftFrameRatio) * ImGuiNative.igGetWindowWidth(), ImGuiNative.igGetWindowHeight() - 40);
 
-            ImGuiNative.igBeginChildFrame(
-                _rightFrameID,
-                rightFrameSize,
-                WindowFlags.ShowBorders | WindowFlags.HorizontalScrollbar);
+            // Right panel
+            ImGui.SameLine(0, 4);
+            Vector2 rightFrameSize = new Vector2((1 - _leftFrameRatio) * ImGui.GetWindowWidth(), ImGui.GetWindowHeight() - 40);
+            ImGui.BeginChildFrame(_rightFrameID, rightFrameSize, WindowFlags.ShowBorders | WindowFlags.HorizontalScrollbar);
             DrawRightFrame(rightFrameSize);
-            ImGuiNative.igEndChildFrame();
+            ImGui.EndChildFrame();
 
-            ImGuiNative.igEnd();
+            ImGui.EndWindow();
         }
 
         private void DrawTopMenuBar()
         {
-            ImGuiNative.igBeginMenuBar();
+            ImGui.BeginMenuBar();
 
-            if (ImGuiNative.igBeginMenu("File", true))
+            if (ImGui.BeginMenu("File", true))
             {
                 ShowModalFilePopup();
 
-                if (ImGuiNative.igMenuItem("Exit", "Alt+F4", false, true))
+                if (ImGui.MenuItem("About", null))
+                {
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Exit", "Alt+F4"))
                 {
                     NativeWindow.Visible = false;
                 }
-                ImGuiNative.igEndMenu();
+                ImGui.EndMenu();
             }
 
-            ImGuiNative.igEndMenuBar();
+            ImGui.EndMenuBar();
         }
 
         private unsafe void ShowModalFilePopup()
         {
             ImGui.Text("Enter file path and press Enter");
-            if (ImGuiNative.igInputText("", _filePathInputBuff, _filePathInputLength, InputTextFlags.EnterReturnsTrue | InputTextFlags.AutoSelectAll, null, null))
+            if (ImGui.InputText("", _filePathInputBuff, _filePathInputLength, InputTextFlags.EnterReturnsTrue | InputTextFlags.AutoSelectAll, null))
             {
                 string path = Marshal.PtrToStringAnsi(_filePathInputBuff);
                 TryOpenAssembly(path);
+                ImGuiNative.igCloseCurrentPopup();
             }
         }
 
-        private void TryOpenAssembly(string path)
+        public async void TryOpenAssembly(string path)
         {
             try
             {
-                CilAssembly newAssm = CilAssembly.Create(path);
+
+                CilAssembly newAssm = await Task.Run(() => CilAssembly.Create(path));
                 AddAssembly(newAssm);
             }
             catch
@@ -113,27 +128,48 @@ namespace AssemblyBrowser
 
         private void DrawRightFrame(Vector2 frameSize)
         {
-            if (_selectedMethod.HasValue)
-            {
-                DrawMethodIL(_selectedMethod.Value, frameSize);
-            }
-        }
+            var rightFrameNode = ListView.GetSelectedNode(ListViewID);
 
-        private unsafe void DrawMethodIL(CilMethodDefinition _selectedMethod, Vector2 frameSize)
-        {
-            ImGuiNative.igPushStyleColor(ColorTarget.FrameBg, new Vector4(1, 1, 1, 1));
-            ImGuiNative.igPushStyleColor(ColorTarget.Text, new Vector4(0, 0, 0, 1));
-            ImGuiNative.igInputTextMultiline(
+            if (_currentRightFrameNode != rightFrameNode)
+            {
+                if (rightFrameNode != null)
+                {
+                    if (_source != null)
+                    {
+                        _source.Cancel();
+                    }
+
+                    _source = new CancellationTokenSource();
+                    _rightFrameTextBuffer = new AsyncTextInputBufferResult(
+                        () =>
+                        {
+                            return rightFrameNode.GetNodeSpecialText();
+                        },
+                        _source.Token,
+                        _rightFrameTextBuffer.Buffer);
+                }
+                else
+                {
+                    _rightFrameTextBuffer = new AsyncTextInputBufferResult(() => "", default(CancellationToken));
+                }
+
+                _currentRightFrameNode = rightFrameNode;
+            }
+
+            ImGui.PushStyleColor(ColorTarget.FrameBg, new Vector4(1, 1, 1, 1));
+            ImGui.PushStyleColor(ColorTarget.Text, new Vector4(0, 0, 0, 1));
+            ImGui.InputTextMultiline(
                 "",
-                _methodIlTextBuff,
-                (uint)_methodIlTextBuffLength,
+                _rightFrameTextBuffer.Buffer.Buffer,
+                _rightFrameTextBuffer.Buffer.Length,
                 frameSize * new Vector2(2.5f, 1f) - Vector2.UnitY * 35f,
                 InputTextFlags.ReadOnly,
                 null,
-                null);
+                IntPtr.Zero);
 
-            ImGuiNative.igPopStyleColor(2);
+            ImGui.PopStyleColor(2);
         }
+
 
         private static unsafe string GetMethodILAsString(CilMethodDefinition methodDef)
         {
@@ -148,53 +184,13 @@ namespace AssemblyBrowser
 
         private unsafe void DrawAssemblyListView()
         {
-            ImGui.Text(".NET Assembly Browser");
-            foreach (CilAssembly assm in _loadedAssemblies)
+            ListView.BeginListView(ListViewID);
+            foreach (IListNode node in _listNodes)
             {
-                DrawAssembly(assm);
+                node.Draw();
             }
-        }
+            ListView.EndListView();
 
-        private void DrawAssembly(CilAssembly assm)
-        {
-            if (ImGuiNative.igTreeNode($"{assm.Name} [{assm.GetFormattedVersion()}]"))
-            {
-                foreach (var typeDef in assm.TypeDefinitions)
-                {
-                    DrawTypeNode(typeDef);
-                }
-                ImGuiNative.igTreePop();
-            }
-        }
-
-        private void DrawTypeNode(CilTypeDefinition typeDef)
-        {
-            if (ImGuiNative.igTreeNode($"{typeDef.Name}"))
-            {
-                foreach (var methodDef in typeDef.MethodDefinitions)
-                {
-                    DrawMethodDefNode(methodDef);
-                }
-                ImGuiNative.igTreePop();
-            }
-        }
-
-        private unsafe void DrawMethodDefNode(CilMethodDefinition methodDef)
-        {
-            string label = $"{methodDef.Name} ( {methodDef.GetDecodedSignature()} )";
-            bool selected = _selectedMethod.HasValue && AreSame(_selectedMethod.Value, methodDef);
-            if (ImGuiNative.igSelectable(label, selected, SelectableFlags.Default, new Vector2()))
-            {
-                OnMethodSelected(methodDef);
-            }
-        }
-
-        private unsafe void OnMethodSelected(CilMethodDefinition methodDef)
-        {
-            _selectedMethod = methodDef;
-            string methodIL = GetMethodILAsString(methodDef);
-            _methodIlTextBuff = Marshal.StringToHGlobalAnsi(methodIL);
-            _methodIlTextBuffLength = methodIL.Length;
         }
 
         private static bool AreSame(CilMethodDefinition method1, CilMethodDefinition method2)

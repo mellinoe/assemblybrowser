@@ -11,16 +11,7 @@ namespace AssemblyBrowser
             for (int i = 0; i < args.Length; i++)
             {
                 string path = args[i];
-                try
-                {
-                    CilAssembly assm = CilAssembly.Create(path);
-                    browser.AddAssembly(assm);
-                }
-                catch
-                {
-                    Console.WriteLine("Error loading " + path);
-                    continue;
-                }
+                browser.TryOpenAssembly(path);
             }
 
             browser.RunWindowLoop();
