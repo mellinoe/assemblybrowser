@@ -12,9 +12,13 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="AssemblyBrowserWindow.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="SimpleGLWindow.cs" />
   </ItemGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Windows_Debug|x64' " />
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Windows_Debug|x64' ">
+    <UseVSHostingProcess>true</UseVSHostingProcess>
+  </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Windows_Release|x64' " />
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Ubuntu_Debug|x64' " />
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Ubuntu_Release|x64' " />
@@ -22,6 +26,11 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'OSX_Release|x64' " />
   <ItemGroup>
     <None Include="project.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="$(DepsDir)OpenTK\OpenTK.dll" />
+    <Reference Include="$(DepsDir)System.Reflection.Metadata.Cil\System.Reflection.Metadata.Cil.dll" />
+    <Reference Include="$(DepsDir)System.Reflection.Metadata\System.Reflection.Metadata.dll" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\deps\cimgui\x64\cimgui.dll">
@@ -32,6 +41,12 @@
       <Link>cimgui.pdb</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\imgui.net\src\ImGui.NET\ImGui.NET.csproj">
+      <Project>{2665014f-0fec-4268-8f77-7b029921ab09}</Project>
+      <Name>ImGui.NET</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory), dir.targets))\dir.targets" />
 </Project>
