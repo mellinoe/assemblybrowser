@@ -2,36 +2,36 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection.Metadata.Cil;
-using System.Text;
 using System.Numerics;
-using System.Reflection.Metadata.Cil.Visitor;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Collections.Immutable;
 
 namespace AssemblyBrowser
 {
     public class AssemblyBrowserWindow : SimpleGLWindow
     {
         private const string ListViewID = "AssemblyListView";
-        private List<CilAssembly> _loadedAssemblies = new List<CilAssembly>();
-        private List<IListNode> _listNodes = new List<IListNode>();
+
+        private ImmutableArray<CilAssembly> _loadedAssemblies = ImmutableArray<CilAssembly>.Empty;
+        private ImmutableArray<IListNode> _listNodes = ImmutableArray<IListNode>.Empty;
 
         private readonly uint _leftFrameId = 0;
         private uint _rightFrameID = 1;
 
-        private float _leftFrameRatio = 0.35f;
-        private CilMethodDefinition? _selectedMethod;
-
-        private AsyncTextInputBufferResult _rightFrameTextBuffer = new AsyncTextInputBufferResult(() => "", default(CancellationToken));
+        private TextInputBuffer _rightFrameTextBuffer = new TextInputBuffer(" ");
+        private string _rightFrameRawText = " ";
 
         private IntPtr _filePathInputBuff = Marshal.AllocHGlobal(1024);
         private uint _filePathInputLength = 1024;
-        private string _currentRightFrameText;
-        private const int MaxRightFrameLength = Int32.MaxValue;
-        private CancellationTokenSource _source;
         private IListNode _currentRightFrameNode;
+
+        private Queue<Action> _actions = new Queue<Action>();
+        private Queue<Action> _backupQueue = new Queue<Action>();
+
+        private bool _selectableText = false;
+        private bool _wrapRightFrame = false;
 
         public AssemblyBrowserWindow() : base(".NET Assembly Browser", 1024, 576)
         {
@@ -39,16 +39,30 @@ namespace AssemblyBrowser
 
         internal void AddAssembly(CilAssembly assm)
         {
-            lock (_loadedAssemblies)
+            _loadedAssemblies = _loadedAssemblies.Add(assm);
+            _listNodes = _listNodes.Add(new AssemblyNode(assm));
+        }
+
+        protected override void PreRenderFrame()
+        {
+            ExecuteQueuedActionsOnMainThread();
+        }
+
+        private void ExecuteQueuedActionsOnMainThread()
+        {
+            var queue = Interlocked.Exchange(ref _actions, _backupQueue);
+            foreach (Action a in queue)
             {
-                _loadedAssemblies.Add(assm);
-                _listNodes.Add(new AssemblyNode(assm));
+                a();
             }
+
+            queue.Clear();
         }
 
         protected unsafe override void UpdateRenderState()
         {
             ImGuiNative.igGetStyle()->WindowRounding = 0;
+            ImGuiNative.igGetStyle()->ColumnsMinSpacing = 1;
             var leftFrameSize = new Vector2(NativeWindow.Width - 10, NativeWindow.Height);
             ImGui.SetNextWindowSize(leftFrameSize, SetCondition.Always);
             ImGui.SetNextWindowPosCenter(SetCondition.Always);
@@ -57,19 +71,20 @@ namespace AssemblyBrowser
 
             DrawTopMenuBar();
 
+            ImGuiNative.igColumns(2, "MainLayoutColumns", true);
+
             // Left panel
             ImGui.BeginChildFrame
                 (_leftFrameId,
-                new Vector2(_leftFrameRatio * ImGui.GetWindowWidth(),
-                ImGui.GetWindowHeight() - 40),
+                new Vector2(ImGuiNative.igGetColumnWidth(0), ImGui.GetWindowHeight() - 40),
                 WindowFlags.ShowBorders | WindowFlags.HorizontalScrollbar);
+
             DrawAssemblyListView();
             ImGui.EndChildFrame();
 
-
             // Right panel
-            ImGui.SameLine(0, 4);
-            Vector2 rightFrameSize = new Vector2((1 - _leftFrameRatio) * ImGui.GetWindowWidth(), ImGui.GetWindowHeight() - 40);
+            ImGuiNative.igNextColumn();
+            Vector2 rightFrameSize = new Vector2(ImGuiNative.igGetColumnWidth(1), ImGui.GetWindowHeight() - 40);
             ImGui.BeginChildFrame(_rightFrameID, rightFrameSize, WindowFlags.ShowBorders | WindowFlags.HorizontalScrollbar);
             DrawRightFrame(rightFrameSize);
             ImGui.EndChildFrame();
@@ -98,6 +113,14 @@ namespace AssemblyBrowser
                 ImGui.EndMenu();
             }
 
+            if (ImGui.BeginMenu("View", true))
+            {
+                ImGui.Checkbox("Selectable right frame text", ref _selectableText);
+                ImGui.Checkbox("Wrap right frame text", ref _wrapRightFrame);
+
+                ImGui.EndMenu();
+            }
+
             ImGui.EndMenuBar();
         }
 
@@ -108,7 +131,7 @@ namespace AssemblyBrowser
             {
                 string path = Marshal.PtrToStringAnsi(_filePathInputBuff);
                 TryOpenAssembly(path);
-                ImGuiNative.igCloseCurrentPopup();
+                ImGui.CloseCurrentPopup();
             }
         }
 
@@ -116,7 +139,6 @@ namespace AssemblyBrowser
         {
             try
             {
-
                 CilAssembly newAssm = await Task.Run(() => CilAssembly.Create(path));
                 AddAssembly(newAssm);
             }
@@ -132,54 +154,64 @@ namespace AssemblyBrowser
 
             if (_currentRightFrameNode != rightFrameNode)
             {
-                if (rightFrameNode != null)
-                {
-                    if (_source != null)
-                    {
-                        _source.Cancel();
-                    }
-
-                    _source = new CancellationTokenSource();
-                    _rightFrameTextBuffer = new AsyncTextInputBufferResult(
-                        () =>
-                        {
-                            return rightFrameNode.GetNodeSpecialText();
-                        },
-                        _source.Token,
-                        _rightFrameTextBuffer.Buffer);
-                }
-                else
-                {
-                    _rightFrameTextBuffer = new AsyncTextInputBufferResult(() => "", default(CancellationToken));
-                }
-
                 _currentRightFrameNode = rightFrameNode;
+                Task.Run(() =>
+                {
+                    string newText = rightFrameNode.GetNodeSpecialText();
+                    TextInputBuffer newBuffer = new TextInputBuffer(newText);
+                    InvokeOnMainThread(() =>
+                    {
+                        if (_currentRightFrameNode == rightFrameNode)
+                        {
+                            _rightFrameTextBuffer.Dispose();
+                            _rightFrameTextBuffer = newBuffer;
+                            _rightFrameRawText = newText;
+                        }
+                        else
+                        {
+                            newBuffer.Dispose();
+                        }
+                    });
+                });
             }
 
-            ImGui.PushStyleColor(ColorTarget.FrameBg, new Vector4(1, 1, 1, 1));
-            ImGui.PushStyleColor(ColorTarget.Text, new Vector4(0, 0, 0, 1));
-            ImGui.InputTextMultiline(
-                "",
-                _rightFrameTextBuffer.Buffer.Buffer,
-                _rightFrameTextBuffer.Buffer.Length,
-                frameSize * new Vector2(2.5f, 1f) - Vector2.UnitY * 35f,
-                InputTextFlags.ReadOnly,
-                null,
-                IntPtr.Zero);
+            if (_selectableText)
+            {
+                ImGui.PushStyleColor(ColorTarget.FrameBg, new Vector4(1, 1, 1, 1));
+                ImGui.PushStyleColor(ColorTarget.Text, new Vector4(0, 0, 0, 1));
 
-            ImGui.PopStyleColor(2);
-        }
+                ImGui.InputTextMultiline(
+                    "",
+                    _rightFrameTextBuffer.Buffer,
+                    _rightFrameTextBuffer.Length,
+                    frameSize * new Vector2(2.5f, 1f) - Vector2.UnitY * 35f,
+                    InputTextFlags.ReadOnly,
+                    null,
+                    IntPtr.Zero);
 
+                ImGui.PopStyleColor(2);
+            }
+            else
+            {
+                unsafe
+                {
+                    byte* start = (byte*)_rightFrameTextBuffer.Buffer.ToPointer();
+                    byte* end = start + _rightFrameTextBuffer.Length;
 
-        private static unsafe string GetMethodILAsString(CilMethodDefinition methodDef)
-        {
-            StringBuilder sb = new StringBuilder();
-            StringWriter writer = new StringWriter(sb);
-            CilToStringVisitor visitor = new CilToStringVisitor(new CilVisitorOptions(false), writer);
+                    if (_wrapRightFrame)
+                    {
+                        ImGuiNative.igPushTextWrapPos(ImGuiNative.igGetColumnWidth(ImGuiNative.igGetColumnIndex()));
+                    }
 
-            visitor.Visit(methodDef);
-            string val = sb.ToString();
-            return val;
+                    ImGuiNative.igTextUnformatted(start, end);
+
+                    if (_wrapRightFrame)
+                    {
+                        ImGuiNative.igPopTextWrapPos();
+                    }
+                }
+            }
+
         }
 
         private unsafe void DrawAssemblyListView()
@@ -193,11 +225,9 @@ namespace AssemblyBrowser
 
         }
 
-        private static bool AreSame(CilMethodDefinition method1, CilMethodDefinition method2)
+        private void InvokeOnMainThread(Action action)
         {
-            return method1.Name == method2.Name
-                && method1.DeclaringType.FullName == method2.DeclaringType.FullName
-                && method1.GetDecodedSignature() == method2.GetDecodedSignature();
+            _actions.Enqueue(action);
         }
     }
 }

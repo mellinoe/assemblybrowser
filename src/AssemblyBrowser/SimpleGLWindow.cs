@@ -152,12 +152,17 @@ namespace AssemblyBrowser
 
             ImGuiNative.igNewFrame();
 
+            PreRenderFrame();
             UpdateRenderState();
 
             ImGuiNative.igRender();
 
             DrawData* data = ImGuiNative.igGetDrawData();
             RenderImDrawData(data);
+        }
+
+        protected virtual void PreRenderFrame()
+        {
         }
 
         private unsafe void UpdateImGuiInput(IO* io)
