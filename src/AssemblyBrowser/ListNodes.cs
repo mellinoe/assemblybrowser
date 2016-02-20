@@ -71,7 +71,7 @@ namespace AssemblyBrowser
 
         public unsafe void Draw()
         {
-            ImGui.PushId(ID.ToString());
+            ImGui.PushID(ID.ToString());
             if (ImGui.Selectable($"##{ID}", IsSelected))
             {
                 bool isCtrlPressed = ImGuiNative.igGetIO()->KeyCtrl == 1;
@@ -90,7 +90,7 @@ namespace AssemblyBrowser
                     ListView.SetSelectedNode(this);
                 }
             }
-            ImGui.PopId();
+            ImGui.PopID();
             if (Children.Any())
             {
                 ImGui.SetNextTreeNodeOpened(!IsCollapsed);

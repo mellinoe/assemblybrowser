@@ -1,14 +1,16 @@
 ﻿{
-  "dependencies": {
-    "Microsoft.NETCore.Console": "1.0.0-beta-23503",
-    "System.Console": "4.0.0-beta-23503",
-    "System.Threading.Thread": "4.0.0-beta-23503"
-  },
-  "runtimes": {
-    "win10-x64": {},
-    "ubuntu.14.04-x64": {}
-  },
-  "frameworks": {
-    "dnxcore50": {}
-  }
+    "dependencies": {
+        "NETStandard.Library": "1.0.0-rc2-23818",
+        "Microsoft.NETCore.Runtime": "1.0.1-rc2-23818",
+        "Microsoft.NETCore.ConsoleHost": "1.0.0-rc2-23818",
+        "System.Console": "4.0.0-rc2-23818",
+        "System.Threading.Thread": "4.0.0-rc2-23818",
+    },
+    "runtimes": {
+        "win10-x64": { },
+        "ubuntu.14.04-x64": { },
+    },
+    "frameworks": {
+        "dnxcore50": { }
+    }
 }

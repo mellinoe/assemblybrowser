@@ -4,126 +4,152 @@ using OpenTK.Graphics;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Input;
 using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace AssemblyBrowser
 {
     public abstract class SimpleGLWindow
     {
-        public NativeWindow NativeWindow { get; set; }
+        private NativeWindow _nativeWindow;
         private GraphicsContext _graphicsContext;
         private int s_fontTexture;
+        private int _pressCount;
+        private IntPtr _textInputBuffer;
+        private int _textInputBufferLength;
+        private float _wheelPosition;
+        private float _sliderVal;
+        private System.Numerics.Vector4 _buttonColor = new System.Numerics.Vector4(55f / 255f, 155f / 255f, 1f, 1f);
+        private bool _mainWindowOpened;
+        private static double s_desiredFrameLength = 1f / 60.0f;
         private DateTime _previousFrameStartTime;
-        private double s_desiredFrameLength = 1f / 60f;
-        private float _previousWheelPosition;
+        private float _scaleFactor;
+        private System.Numerics.Vector3 _positionValue = new System.Numerics.Vector3(500);
 
-        protected abstract void UpdateRenderState();
+        public NativeWindow NativeWindow => _nativeWindow;
 
-        public Color WindowBackgroundColor { get; set; } = Color.Black;
-
-        public unsafe SimpleGLWindow(string title, int width, int height)
+        public unsafe SimpleGLWindow(string title, int desiredWidth, int desiredHeight)
         {
-            NativeWindow = new NativeWindow(width, height, title, GameWindowFlags.Default, GraphicsMode.Default, DisplayDevice.Default);
+            _nativeWindow = new NativeWindow(desiredWidth, desiredHeight, title, GameWindowFlags.Default, GraphicsMode.Default, DisplayDevice.Default);
+            _scaleFactor = NativeWindow.Width / desiredWidth;
 
-            _graphicsContext = new GraphicsContext(GraphicsMode.Default, NativeWindow.WindowInfo);
+            GraphicsContextFlags flags = GraphicsContextFlags.Default;
+            _graphicsContext = new GraphicsContext(GraphicsMode.Default, NativeWindow.WindowInfo, 3, 0, flags);
             _graphicsContext.MakeCurrent(NativeWindow.WindowInfo);
-            _graphicsContext.LoadAll();
-
+            ((IGraphicsContextInternal)_graphicsContext).LoadAll(); // wtf is this?
+            GL.ClearColor(Color.Black);
             NativeWindow.Visible = true;
 
             NativeWindow.KeyDown += OnKeyDown;
             NativeWindow.KeyUp += OnKeyUp;
             NativeWindow.KeyPress += OnKeyPress;
 
-            IO* io = ImGuiNative.igGetIO();
-            ImGuiNative.ImFontAtlas_AddFontDefault(io->FontAtlas);
+            ImGui.LoadDefaultFont();
 
-            SetOpenTKKeyMappings(io);
+            SetOpenTKKeyMappings();
+
+            _textInputBufferLength = 1024;
+            _textInputBuffer = Marshal.AllocHGlobal(_textInputBufferLength);
+            long* ptr = (long*)_textInputBuffer.ToPointer();
+            for (int i = 0; i < 1024 / sizeof(long); i++)
+            {
+                ptr[i] = 0;
+            }
 
             CreateDeviceObjects();
         }
 
-        private static unsafe void SetOpenTKKeyMappings(IO* io)
-        {
-            io->KeyMap[(int)GuiKey.Tab] = (int)Key.Tab;
-            io->KeyMap[(int)GuiKey.LeftArrow] = (int)Key.Left;
-            io->KeyMap[(int)GuiKey.RightArrow] = (int)Key.Right;
-            io->KeyMap[(int)GuiKey.UpArrow] = (int)Key.Up;
-            io->KeyMap[(int)GuiKey.DownArrow] = (int)Key.Down;
-            io->KeyMap[(int)GuiKey.PageUp] = (int)Key.PageUp;
-            io->KeyMap[(int)GuiKey.PageDown] = (int)Key.PageDown;
-            io->KeyMap[(int)GuiKey.Home] = (int)Key.Home;
-            io->KeyMap[(int)GuiKey.End] = (int)Key.End;
-            io->KeyMap[(int)GuiKey.Delete] = (int)Key.Delete;
-            io->KeyMap[(int)GuiKey.Backspace] = (int)Key.BackSpace;
-            io->KeyMap[(int)GuiKey.Enter] = (int)Key.Enter;
-            io->KeyMap[(int)GuiKey.Escape] = (int)Key.Escape;
-            io->KeyMap[(int)GuiKey.A] = (int)Key.A;
-            io->KeyMap[(int)GuiKey.C] = (int)Key.C;
-            io->KeyMap[(int)GuiKey.V] = (int)Key.V;
-            io->KeyMap[(int)GuiKey.X] = (int)Key.X;
-            io->KeyMap[(int)GuiKey.Y] = (int)Key.Y;
-            io->KeyMap[(int)GuiKey.Z] = (int)Key.Z;
-        }
-
         private void OnKeyPress(object sender, KeyPressEventArgs e)
         {
-            ImGuiNative.ImGuiIO_AddInputCharacter(e.KeyChar);
+            ImGui.AddInputCharacter(e.KeyChar);
+        }
+
+        private static unsafe void SetOpenTKKeyMappings()
+        {
+            IO io = ImGui.GetIO();
+            io.KeyMap[GuiKey.Tab] = (int)Key.Tab;
+            io.KeyMap[GuiKey.LeftArrow] = (int)Key.Left;
+            io.KeyMap[GuiKey.RightArrow] = (int)Key.Right;
+            io.KeyMap[GuiKey.UpArrow] = (int)Key.Up;
+            io.KeyMap[GuiKey.DownArrow] = (int)Key.Down;
+            io.KeyMap[GuiKey.PageUp] = (int)Key.PageUp;
+            io.KeyMap[GuiKey.PageDown] = (int)Key.PageDown;
+            io.KeyMap[GuiKey.Home] = (int)Key.Home;
+            io.KeyMap[GuiKey.End] = (int)Key.End;
+            io.KeyMap[GuiKey.Delete] = (int)Key.Delete;
+            io.KeyMap[GuiKey.Backspace] = (int)Key.BackSpace;
+            io.KeyMap[GuiKey.Enter] = (int)Key.Enter;
+            io.KeyMap[GuiKey.Escape] = (int)Key.Escape;
+            io.KeyMap[GuiKey.A] = (int)Key.A;
+            io.KeyMap[GuiKey.C] = (int)Key.C;
+            io.KeyMap[GuiKey.V] = (int)Key.V;
+            io.KeyMap[GuiKey.X] = (int)Key.X;
+            io.KeyMap[GuiKey.Y] = (int)Key.Y;
+            io.KeyMap[GuiKey.Z] = (int)Key.Z;
         }
 
         private unsafe void OnKeyDown(object sender, KeyboardKeyEventArgs e)
         {
-            var ptr = ImGuiNative.igGetIO();
-            ptr->KeysDown[(int)e.Key] = 1;
-            UpdateModifiers(e, ptr);
+            ImGui.GetIO().KeysDown[(int)e.Key] = true;
+            UpdateModifiers(e);
         }
 
         private unsafe void OnKeyUp(object sender, KeyboardKeyEventArgs e)
         {
-            var ptr = ImGuiNative.igGetIO();
-            ptr->KeysDown[(int)e.Key] = 0;
-            UpdateModifiers(e, ptr);
+            ImGui.GetIO().KeysDown[(int)e.Key] = false;
+            UpdateModifiers(e);
         }
 
-        private static unsafe void UpdateModifiers(KeyboardKeyEventArgs e, IO* ptr)
+        private static unsafe void UpdateModifiers(KeyboardKeyEventArgs e)
         {
-            ptr->KeyAlt = e.Alt ? (byte)1 : (byte)0;
-            ptr->KeyCtrl = e.Control ? (byte)1 : (byte)0;
-            ptr->KeyShift = e.Shift ? (byte)1 : (byte)0;
+            IO io = ImGui.GetIO();
+            io.AltPressed = e.Alt;
+            io.CtrlPressed = e.Control;
+            io.ShiftPressed = e.Shift;
         }
 
         private unsafe void CreateDeviceObjects()
         {
-            IO* io = ImGuiNative.igGetIO();
+            IO io = ImGui.GetIO();
 
             // Build texture atlas
-            byte* pixels;
-            int width, height;
-            ImGuiNative.ImFontAtlas_GetTexDataAsAlpha8(io->FontAtlas, &pixels, &width, &height, null);
+            FontTextureData texData = io.FontAtlas.GetTexDataAsAlpha8();
 
             // Create OpenGL texture
             s_fontTexture = GL.GenTexture();
             GL.BindTexture(TextureTarget.Texture2D, s_fontTexture);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)All.Linear);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)All.Linear);
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Alpha, width, height, 0, PixelFormat.Alpha, PixelType.UnsignedByte, new IntPtr(pixels));
+            GL.TexImage2D(
+                TextureTarget.Texture2D,
+                0,
+                PixelInternalFormat.Alpha,
+                texData.Width,
+                texData.Height,
+                0,
+                PixelFormat.Alpha,
+                PixelType.UnsignedByte,
+                new IntPtr(texData.Pixels));
 
             // Store the texture identifier in the ImFontAtlas substructure.
-            io->FontAtlas->TexID = new IntPtr(s_fontTexture).ToPointer();
+            io.FontAtlas.SetTexID(s_fontTexture);
 
             // Cleanup (don't clear the input data if you want to append new fonts later)
             //io.Fonts->ClearInputData();
-            ImGuiNative.ImFontAtlas_ClearTexData(io->FontAtlas);
+            io.FontAtlas.ClearTexData();
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
         public void RunWindowLoop()
         {
+            NativeWindow.Visible = true;
             while (NativeWindow.Visible)
             {
                 _previousFrameStartTime = DateTime.UtcNow;
 
                 RenderFrame();
+
                 NativeWindow.ProcessEvents();
 
                 DateTime afterFrameTime = DateTime.UtcNow;
@@ -136,36 +162,39 @@ namespace AssemblyBrowser
                     {
                         Thread.Sleep(0);
                     }
-                    Thread.Sleep((int)(sleepTime * 1000));
                 }
             }
         }
 
         private unsafe void RenderFrame()
         {
-            IO* io = ImGuiNative.igGetIO();
-            io->DisplaySize = new System.Numerics.Vector2(NativeWindow.Width, NativeWindow.Height);
-            io->DisplayFramebufferScale = new System.Numerics.Vector2(1, 1);
-            io->DeltaTime = (1f / 60f);
+            IO io = ImGui.GetIO();
+            io.DisplaySize = new System.Numerics.Vector2(NativeWindow.Width, NativeWindow.Height);
+            io.DisplayFramebufferScale = new System.Numerics.Vector2(_scaleFactor);
+            io.DeltaTime = (1f / 60f);
 
             UpdateImGuiInput(io);
 
-            ImGuiNative.igNewFrame();
-
+            ImGui.NewFrame();
             PreRenderFrame();
             UpdateRenderState();
 
-            ImGuiNative.igRender();
+            ImGui.Render();
 
-            DrawData* data = ImGuiNative.igGetDrawData();
+            DrawData* data = ImGui.GetDrawData();
             RenderImDrawData(data);
         }
 
-        protected virtual void PreRenderFrame()
+        protected abstract void PreRenderFrame();
+        protected abstract void UpdateRenderState();
+
+        private unsafe int OnTextEdited(TextEditCallbackData* data)
         {
+            char currentEventChar = (char)data->EventChar;
+            return 0;
         }
 
-        private unsafe void UpdateImGuiInput(IO* io)
+        private unsafe void UpdateImGuiInput(IO io)
         {
             MouseState cursorState = Mouse.GetCursorState();
             MouseState mouseState = Mouse.GetState();
@@ -173,21 +202,21 @@ namespace AssemblyBrowser
             if (NativeWindow.Bounds.Contains(cursorState.X, cursorState.Y))
             {
                 Point windowPoint = NativeWindow.PointToClient(new Point(cursorState.X, cursorState.Y));
-                io->MousePos = new System.Numerics.Vector2(windowPoint.X, windowPoint.Y);
+                io.MousePosition = new System.Numerics.Vector2(windowPoint.X / io.DisplayFramebufferScale.X, windowPoint.Y / io.DisplayFramebufferScale.Y);
             }
             else
             {
-                io->MousePos = new System.Numerics.Vector2(-1f, -1f);
+                io.MousePosition = new System.Numerics.Vector2(-1f, -1f);
             }
 
-            io->MouseDown[0] = (mouseState.LeftButton == ButtonState.Pressed) ? (byte)255 : (byte)0; // Left
-            io->MouseDown[1] = (mouseState.RightButton == ButtonState.Pressed) ? (byte)255 : (byte)0; // Right
-            io->MouseDown[2] = (mouseState.MiddleButton == ButtonState.Pressed) ? (byte)255 : (byte)0; // Middle
+            io.MouseDown[0] = mouseState.LeftButton == ButtonState.Pressed;
+            io.MouseDown[1] = mouseState.RightButton == ButtonState.Pressed;
+            io.MouseDown[2] = mouseState.MiddleButton == ButtonState.Pressed;
 
             float newWheelPos = mouseState.WheelPrecise;
-            float delta = newWheelPos - _previousWheelPosition;
-            _previousWheelPosition = newWheelPos;
-            io->MouseWheel = delta;
+            float delta = newWheelPos - _wheelPosition;
+            _wheelPosition = newWheelPos;
+            io.MouseWheel = delta;
         }
 
         private unsafe void RenderImDrawData(DrawData* draw_data)
@@ -197,8 +226,9 @@ namespace AssemblyBrowser
             display_w = NativeWindow.Width;
             display_h = NativeWindow.Height;
 
+            Vector4 clear_color = new Vector4(114f / 255f, 144f / 255f, 154f / 255f, 1.0f);
             GL.Viewport(0, 0, display_w, display_h);
-            GL.ClearColor(WindowBackgroundColor);
+            GL.ClearColor(clear_color.X, clear_color.Y, clear_color.Z, clear_color.W);
             GL.Clear(ClearBufferMask.ColorBufferBit);
 
             // We are using the OpenGL fixed pipeline to make the example code simpler to read!
@@ -219,15 +249,20 @@ namespace AssemblyBrowser
             GL.UseProgram(0);
 
             // Handle cases of screen coordinates != from framebuffer coordinates (e.g. retina displays)
-            IO* io = ImGuiNative.igGetIO();
-            float fb_height = io->DisplaySize.Y * io->DisplayFramebufferScale.Y;
-            ImGui.ScaleClipRects(draw_data, io->DisplayFramebufferScale);
+            IO io = ImGui.GetIO();
+            ImGui.ScaleClipRects(draw_data, io.DisplayFramebufferScale);
 
             // Setup orthographic projection matrix
             GL.MatrixMode(MatrixMode.Projection);
             GL.PushMatrix();
             GL.LoadIdentity();
-            GL.Ortho(0.0f, io->DisplaySize.X, io->DisplaySize.Y, 0.0f, -1.0f, 1.0f);
+            GL.Ortho(
+                0.0f,
+                io.DisplaySize.X / io.DisplayFramebufferScale.X,
+                io.DisplaySize.Y / io.DisplayFramebufferScale.Y,
+                0.0f,
+                -1.0f,
+                1.0f);
             GL.MatrixMode(MatrixMode.Modelview);
             GL.PushMatrix();
             GL.LoadIdentity();
@@ -260,7 +295,7 @@ namespace AssemblyBrowser
                         GL.BindTexture(TextureTarget.Texture2D, pcmd->TextureId.ToInt32());
                         GL.Scissor(
                             (int)pcmd->ClipRect.X,
-                            (int)(fb_height - pcmd->ClipRect.W),
+                            (int)(io.DisplaySize.Y - pcmd->ClipRect.W),
                             (int)(pcmd->ClipRect.Z - pcmd->ClipRect.X),
                             (int)(pcmd->ClipRect.W - pcmd->ClipRect.Y));
                         ushort[] indices = new ushort[pcmd->ElemCount];
