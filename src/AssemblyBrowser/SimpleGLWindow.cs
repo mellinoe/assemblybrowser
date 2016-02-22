@@ -15,9 +15,6 @@ namespace AssemblyBrowser
         private NativeWindow _nativeWindow;
         private GraphicsContext _graphicsContext;
         private int s_fontTexture;
-        private int _pressCount;
-        private IntPtr _textInputBuffer;
-        private int _textInputBufferLength;
         private float _wheelPosition;
         private float _sliderVal;
         private System.Numerics.Vector4 _buttonColor = new System.Numerics.Vector4(55f / 255f, 155f / 255f, 1f, 1f);
@@ -26,6 +23,17 @@ namespace AssemblyBrowser
         private DateTime _previousFrameStartTime;
         private float _scaleFactor;
         private System.Numerics.Vector3 _positionValue = new System.Numerics.Vector3(500);
+
+        private bool _visible = false;
+        public bool Visible
+        {
+            get { return _visible; }
+            set
+            {
+                _visible = value;
+                NativeWindow.Visible = value;
+            }
+        }
 
         public NativeWindow NativeWindow => _nativeWindow;
 
@@ -39,7 +47,9 @@ namespace AssemblyBrowser
             _graphicsContext.MakeCurrent(NativeWindow.WindowInfo);
             ((IGraphicsContextInternal)_graphicsContext).LoadAll(); // wtf is this?
             GL.ClearColor(Color.Black);
-            NativeWindow.Visible = true;
+
+            NativeWindow.Closing += OnWindowClosing;
+
 
             NativeWindow.KeyDown += OnKeyDown;
             NativeWindow.KeyUp += OnKeyUp;
@@ -49,15 +59,13 @@ namespace AssemblyBrowser
 
             SetOpenTKKeyMappings();
 
-            _textInputBufferLength = 1024;
-            _textInputBuffer = Marshal.AllocHGlobal(_textInputBufferLength);
-            long* ptr = (long*)_textInputBuffer.ToPointer();
-            for (int i = 0; i < 1024 / sizeof(long); i++)
-            {
-                ptr[i] = 0;
-            }
-
             CreateDeviceObjects();
+        }
+
+        private void OnWindowClosing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            _graphicsContext.Dispose();
+            Visible = false;
         }
 
         private void OnKeyPress(object sender, KeyPressEventArgs e)
@@ -143,8 +151,8 @@ namespace AssemblyBrowser
 
         public void RunWindowLoop()
         {
-            NativeWindow.Visible = true;
-            while (NativeWindow.Visible)
+            Visible = true;
+            while (Visible)
             {
                 _previousFrameStartTime = DateTime.UtcNow;
 
