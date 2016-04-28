@@ -1,22 +1,30 @@
 ﻿{
-    "dependencies": {
-        "NETStandard.Library": "1.0.0-rc2-23727",
-        "Microsoft.NETCore.Runtime": "1.0.1-rc2-23727",
-        "Microsoft.NETCore.ConsoleHost": "1.0.0-rc2-23727",
-        "System.Runtime.InteropServices.RuntimeInformation": "4.0.0-rc2-23727",
-        "System.Numerics.Vectors": "4.1.1-rc2-23727",
-        "System.Collections.Immutable": "1.2.0-rc2-23727",
-        "System.Console": "4.0.0-rc2-23727",
-        "System.Threading.Thread": "4.0.0-rc2-23727",
-        "System.ComponentModel": "4.0.0",
-        "System.Linq.Expressions": "4.0.10",
-        "System.IO.FileSystem.Watcher": "4.0.0-rc2-23727", 
+  "compilationOptions": {
+    "allowUnsafe": true,
+    "emitEntryPoint": true,
+    "debugType": "portable"
+  },
+  "dependencies": {
+    "Microsoft.NETCore.App": {
+      "type": "platform",
+      "version": "1.0.0-rc2-3002520"
     },
-    "runtimes": {
-        "win10-x64": { },
-        "ubuntu.14.04-x64": { },
-    },
-    "frameworks": {
-        "dnxcore50": { }
+    "ImGui.NET": "0.1.0",
+    "OpenTK.NETCore":  "1.1.2287.6424",
+    "Microsoft.NETCore.ConsoleHost": "1.0.0-rc3-24019-00",
+    "Microsoft.NETCore.Runtime": "1.0.2-rc3-24019-00",
+    "System.ComponentModel": "4.0.1-rc3-24019-00",
+    "System.Threading.Thread": "4.0.0-rc3-24019-00",
+    "System.Reflection.TypeExtensions": "4.1.0-rc3-24019-00",
+    "System.Reflection.Metadata.Cil": "0.1.0-e160428-1"
+  },
+  "frameworks": {
+    "netcoreapp1.0": {
+      "imports": "dnxcore50"
     }
+  },
+  "runtimes": {
+    "win7-x64": { },
+    "ubuntu.14.04-x64": { },
+  },
 }
